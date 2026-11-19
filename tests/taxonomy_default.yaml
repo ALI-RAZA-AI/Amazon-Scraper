@@ -1,0 +1,25 @@
+# Target label set for `category_normalized`.
+# Each category has a short description; the RAG step embeds these and picks
+# the closest one for every product. Add, remove or rename freely.
+categories:
+  Electronics > Audio > Headphones & Earbuds: wireless bluetooth earbuds headphones earphones noise cancelling headset audio
+  Electronics > Audio > Speakers: bluetooth speaker portable soundbar smart speaker audio
+  Electronics > Computers > Laptops: laptop notebook computer chromebook macbook
+  Electronics > Computers > Accessories: keyboard mouse usb hub monitor stand webcam laptop accessories cable
+  Electronics > Mobile > Phone Accessories: phone case charger screen protector power bank cable mobile
+  Electronics > Wearables: smartwatch fitness tracker smart band wearable
+  Home & Kitchen > Kitchen Appliances: blender air fryer coffee maker kettle toaster microwave mixer appliance
+  Home & Kitchen > Cookware: pan pot skillet cookware nonstick cast iron baking
+  Home & Kitchen > Furniture & Decor: chair table shelf lamp decor rug curtain furniture
+  Home & Kitchen > Bedding & Bath: sheets pillow blanket towel bedding comforter mattress
+  Beauty & Personal Care: skincare makeup shampoo lotion serum cosmetics hair care trimmer
+  Health & Household: vitamins supplements first aid cleaning household health
+  Sports & Outdoors: fitness gym yoga dumbbells camping hiking bicycle outdoor sports
+  Clothing, Shoes & Jewelry: shirt shoes sneakers dress jacket jewelry watch clothing apparel
+  Toys & Games: toy game puzzle lego board game kids children
+  Books: book paperback hardcover novel author edition
+  Office Products: pen paper notebook stapler desk organizer office supplies printer ink
+  Tools & Home Improvement: drill screwdriver tool kit hardware wrench power tools
+  Automotive: car vehicle dash cam tire motor oil automotive accessories
+  Pet Supplies: dog cat pet food leash litter toy pet
+  Grocery: snacks coffee tea food beverage grocery

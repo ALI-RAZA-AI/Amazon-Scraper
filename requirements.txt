@@ -1,0 +1,17 @@
+requests>=2.31
+beautifulsoup4>=4.12
+lxml>=5.0
+PyYAML>=6.0
+numpy>=1.26
+scikit-learn>=1.4
+pandas>=2.1
+pytest>=8.0
+# frontend
+streamlit>=1.46
+ruamel.yaml>=0.18      # comment-preserving YAML saves from the frontend
+altair>=5.0
+# headless-browser fallback (then: python -m playwright install chromium)
+playwright>=1.45
+# optional:
+# pyarrow>=15.0                # parquet output (installed with streamlit anyway)
+# sentence-transformers>=3.0   # dense embeddings for hybrid RAG retrieval

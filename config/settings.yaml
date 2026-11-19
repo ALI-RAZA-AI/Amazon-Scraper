@@ -1,0 +1,42 @@
+# Runtime settings (not the data structure — that's schema.yaml).
+# Everything here can also be edited on the "Settings" page of the frontend.
+
+marketplace: amazon.com          # amazon.co.uk, amazon.ae, amazon.in, amazon.de, ...
+
+fetch:
+  backend: auto                  # auto: plain requests, switch to a headless browser when blocked
+                                 # requests: never use the browser | playwright: browser only
+  fallback_after: 2              # blocked attempts before "auto" switches to the browser
+  min_delay: 2.0                 # seconds between requests (randomised up to max_delay)
+  max_delay: 5.0
+  max_retries: 4
+  timeout: 25
+  cache_dir: data/cache          # raw HTML is cached here; re-runs and rebuilds don't re-download
+  delivery_zip: auto             # "Deliver to" location: auto = a ZIP in the marketplace's country
+                                 # (10001 for amazon.com), "" = leave Amazon's IP-based guess.
+                                 # Outside that country Amazon otherwise hides prices and reviews.
+  proxies: []                    # e.g. ["http://user:pass@host:port", ...] rotated per request
+  cookies: {}                    # extra cookies; currency/language cookies are set automatically
+
+discovery:                       # only used by `run -q "search terms"` (CLI)
+  max_search_pages: 3
+  skip_sponsored: true
+
+rag:
+  embedder: auto                 # auto | sentence-transformers | tfidf
+  model: sentence-transformers/all-MiniLM-L6-v2
+  chunk_size: 400                # characters per chunk
+  chunk_overlap: 60
+  top_k: 4
+  verify_existing: true          # cross-check scraped values against the main-product text
+  llm:
+    provider: anthropic          # none | openai | anthropic | ollama
+    model: claude-opus-5-5       # e.g. gpt-4o-mini, claude-haiku-5-5, llama3.1 (ollama)
+    base_url: null               # for OpenAI-compatible servers (Groq, vLLM, LM Studio ...)
+    api_key_env: null               # env var with the key; default OPENAI_API_KEY / ANTHROPIC_API_KEY
+    temperature: 0.0
+
+output:
+  dir: data/output
+  formats: [csv]                 # CSVs are always written; add jsonl (split .jsonl files) / parquet
+  min_quality: 0.5               # products below this quality score go to rejected.csv

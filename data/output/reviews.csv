@@ -1,0 +1,3 @@
+﻿review_id,asin,rating,title,body,author,review_date,review_country,verified_purchase,helpful_votes,variant,split
+R1TESTREVIEW01,B0TEST0001,5.0,Best earbuds I have owned,Great sound and the noise cancelling works on the train.,Jane D.,2024-03-03,United States,True,1,Color: Midnight Black,train
+R2TESTREVIEW02,B0TEST0001,3.0,Decent but bulky,The case is big. I paid $19.99 on sale.,Sam K.,2024-01-05,United Kingdom,False,12,,train

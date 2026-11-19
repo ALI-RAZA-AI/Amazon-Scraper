@@ -1,0 +1,459 @@
+# =====================================================================
+#  TEST COPY of the default schema (v1.1). Tests use this file so that editing
+#  config/schema.yaml in the app never breaks them. Don't edit for normal use.
+#  DATA SCHEMA  —  edit this file (or the "Data structure" page of the
+#  frontend) to change what the dataset contains.
+#  Full explanation of every key: see SCHEMA.md
+# =====================================================================
+
+dataset:
+  name: amazon_products
+  version: "1.1.0"
+  primary_key: asin            # used for de-duplication
+  description: >
+    Amazon product listings scraped from public product pages, cleaned,
+    validated and enriched with retrieval-grounded attributes.
+
+# How each record is turned into training examples.
+training:
+  # The `text` column. {field_name} placeholders are filled from the record;
+  # lists are joined with "; ". Missing values become empty strings.
+  # Price and rating are left out on purpose: they are prediction targets.
+  # ({specifications} is also left out: Amazon's spec tables usually contain
+  # "Customer Reviews: 4.4 out of 5 stars", which would leak the rating.)
+  text_template: |
+    Title: {title}
+    Brand: {brand}
+    Category: {category_path}
+    Features: {bullet_points}
+    Description: {description}
+  label_field: category_normalized   # copied into `label` (classification); null = no label
+  targets: [price, rating]           # regression targets: reported in DATASET_CARD.md, kept out of `text`
+  splits: {train: 0.8, validation: 0.1, test: 0.1}
+  seed: 42
+
+# Shape of the CSV files. Changing this needs no re-scrape (frontend: "Export CSV").
+export:
+  columns: []                  # fields to include, in this order; [] = every field below
+  extra_columns: [text, label, quality, split]   # columns added by the pipeline
+  rename: {}                   # {field_name: "CSV header"}, e.g. {category_normalized: category}
+  list_separator: " | "        # how list fields (bullets, images) are joined in a CSV cell
+  review_columns: []           # review fields to include in reviews.csv; [] = all
+  review_rename: {}            # {review_field: "CSV header"} for reviews.csv
+
+# ---------------------------------------------------------------------
+#  FIELDS
+#  type: string | int | float | bool | list | dict | enum
+#  sources: tried top-to-bottom, first non-empty wins
+#     css / attr       -> CSS selector on the product page (text or attribute)
+#     css_all          -> all matches, returns a list
+#     spec             -> one value from the merged specification tables
+#     specs            -> all specification tables merged into one dict
+#     table            -> key/value rows of one table -> dict (or one value with key:)
+#     jsonld           -> key path inside <script type="application/ld+json">
+#     regex_url        -> regex group on the page URL
+#     regex_html       -> regex group on the raw HTML
+#     exists           -> true/false: does the selector match?
+#     computed         -> filled by the pipeline (url, scraped_at, marketplace)
+#     derived          -> computed from other fields after RAG (discount_pct, ...)
+#     regex: "..."     -> optional on css / spec / attr: keep group 1 of the text
+#  rag: fill (if empty) or verify the value with retrieval over the page text
+# ---------------------------------------------------------------------
+fields:
+
+  - name: asin
+    type: string
+    required: true
+    description: Amazon Standard Identification Number (10 chars).
+    constraints: {regex: "^[A-Z0-9]{10}$"}
+    sources:
+      - {css: "input#ASIN", attr: value}
+      - {regex_url: "/(?:dp|gp/product)/([A-Z0-9]{10})"}
+      - {regex_html: "\"asin\"\\s*:\\s*\"([A-Z0-9]{10})\""}
+
+  - name: title
+    type: string
+    required: true
+    description: Product title as shown on the page.
+    constraints: {min_length: 3, max_length: 500}
+    sources:
+      - {css: "#productTitle"}
+      - {css: "#title"}
+      - {jsonld: name}
+    transforms: [clean_text]
+
+  - name: brand
+    type: string
+    description: Brand / manufacturer name.
+    sources:
+      - {css: "#bylineInfo"}
+      - {jsonld: brand.name}
+      - {spec: [Brand, Brand Name]}
+    transforms: [clean_text, strip_brand_prefix]
+    rag:
+      mode: fill
+      query: "brand manufacturer made by"
+      spec_keys: [Brand, Manufacturer]
+
+  - name: price
+    type: float
+    description: Current selling price (number only).
+    constraints: {min: 0, max: 100000}
+    sources:
+      - {css: "#corePriceDisplay_desktop_feature_div .priceToPay .a-offscreen"}
+      - {css: "#corePriceDisplay_desktop_feature_div .priceToPay"}   # visible "$ 228 . 36" when .a-offscreen is empty
+      - {css: "#corePrice_feature_div .a-price .a-offscreen"}
+      - {css: "#corePriceDisplay_desktop_feature_div .a-price .a-offscreen"}
+      - {css: "#apex_desktop .priceToPay .a-offscreen"}
+      - {css: "#apex_desktop .priceToPay"}
+      - {css: "#apex_desktop .a-price .a-offscreen"}
+      - {css: "#twister-plus-price-data-price", attr: value}
+      - {css: "#priceblock_ourprice"}
+      - {css: "#price_inside_buybox"}
+      - {jsonld: offers.price}
+      - {css: ".a-price .a-offscreen"}   # last resort: may hit a carousel, so RAG verifies it
+    transforms: [parse_price]
+    rag:
+      mode: fill
+      query: "price cost dollars"
+      patterns: ["[$£€₹]\\s?([0-9][0-9,]*\\.?[0-9]*)"]
+      on_unverified: drop      # a price that isn't on the main product is worse than no price
+
+  - name: currency
+    type: enum
+    choices: [USD, GBP, EUR, INR, CAD, AUD, JPY, AED, SAR, MXN, BRL, SGD, SEK, PLN, TRY, EGP, PKR]
+    description: ISO currency code, detected from the price symbol or marketplace.
+    sources:
+      - {css: "#corePriceDisplay_desktop_feature_div .a-price-symbol"}
+      - {css: ".a-price .a-price-symbol"}
+      - {jsonld: offers.priceCurrency}
+    transforms: [currency_code]
+    default_from_marketplace: true
+
+  - name: list_price
+    type: float
+    description: Original / "List" price before discount, if shown.
+    sources:
+      - {css: ".basisPrice .a-offscreen"}
+      - {css: "#corePriceDisplay_desktop_feature_div .a-text-price .a-offscreen"}
+      - {css: "#corePrice_feature_div .a-text-price .a-offscreen"}
+    transforms: [parse_price]
+    rag:
+      mode: fill               # no patterns: only verifies that the value is on the main product
+      query: "list price typical price was"
+      on_unverified: drop
+
+  - name: discount_pct
+    type: float
+    description: Percent off the list price (0 when no list price is shown).
+    sources:
+      - {derived: discount_pct}
+  - name: rating
+    type: float
+    description: Average star rating (0-5).
+    constraints: {min: 0, max: 5}
+    sources:
+      - {css: "#acrPopover", attr: title}
+      - {css: "span[data-hook='rating-out-of-text']"}
+      - {css: "#averageCustomerReviews .a-icon-alt"}
+      - {jsonld: aggregateRating.ratingValue}
+    transforms: [parse_float]
+
+  - name: review_count
+    type: int
+    description: Number of customer ratings.
+    constraints: {min: 0}
+    sources:
+      - {css: "#acrCustomerReviewText"}
+      - {jsonld: aggregateRating.reviewCount}
+    transforms: [parse_int]
+
+  # ----- Review signals. Amazon shows individual reviews only to signed-in
+  # ----- users, but every product page carries these summaries of all reviews.
+  # ----- They reveal the rating: drop them from the features when predicting `rating`.
+  - name: rating_5_pct
+    type: int
+    weight: 0.2                # the five histogram fields count as one field in the quality score
+    description: Percent of ratings that are 5 stars.
+    constraints: {min: 0, max: 100}
+    sources:
+      - {css: "[data-csa-c-content-id='customerReviews-histogram-fiveStar'] [aria-label]", attr: aria-label, regex: "(\\d+) percent"}
+
+  - name: rating_4_pct
+    type: int
+    weight: 0.2
+    constraints: {min: 0, max: 100}
+    sources:
+      - {css: "[data-csa-c-content-id='customerReviews-histogram-fourStar'] [aria-label]", attr: aria-label, regex: "(\\d+) percent"}
+
+  - name: rating_3_pct
+    type: int
+    weight: 0.2
+    constraints: {min: 0, max: 100}
+    sources:
+      - {css: "[data-csa-c-content-id='customerReviews-histogram-threeStar'] [aria-label]", attr: aria-label, regex: "(\\d+) percent"}
+
+  - name: rating_2_pct
+    type: int
+    weight: 0.2
+    constraints: {min: 0, max: 100}
+    sources:
+      - {css: "[data-csa-c-content-id='customerReviews-histogram-twoStar'] [aria-label]", attr: aria-label, regex: "(\\d+) percent"}
+
+  - name: rating_1_pct
+    type: int
+    weight: 0.2
+    constraints: {min: 0, max: 100}
+    sources:
+      - {css: "[data-csa-c-content-id='customerReviews-histogram-oneStar'] [aria-label]", attr: aria-label, regex: "(\\d+) percent"}
+
+  - name: review_summary
+    type: string
+    weight: 0.5
+    description: Amazon's "Customers say" summary of all reviews (generated by Amazon).
+    sources:
+      - {css: "[data-testid='overall-summary']"}
+      - {css: "#product-summary p"}
+    transforms: [clean_text]
+
+  - name: aspects_positive
+    type: list
+    weight: 0.25
+    description: Review topics Amazon marks as positive, e.g. quality, value for money.
+    sources:
+      - {regex_html_all: "cr-product-insights-detail-page_button_\\d+_POSITIVE_([^\"]+)\""}
+
+  - name: aspects_negative
+    type: list
+    weight: 0.25
+    description: Review topics Amazon marks as mixed or negative, e.g. size, weight.
+    sources:
+      - {regex_html_all: "cr-product-insights-detail-page_button_\\d+_(?:MIXED|NEGATIVE)_([^\"]+)\""}
+
+  - name: best_sellers_rank
+    type: int
+    description: Main Best Sellers Rank (lower = sells more).
+    constraints: {min: 1}
+    sources:
+      - {spec: Best Sellers Rank}
+    transforms: [parse_int]
+
+  - name: date_first_available
+    type: string
+    description: Date first listed on Amazon (YYYY-MM-DD).
+    sources:
+      - {spec: [Date First Available, Release date]}
+    transforms: [parse_date]
+
+  - name: availability
+    type: string
+    description: Stock message (e.g. "In Stock").
+    sources:
+      - {css: "#availability span"}
+      - {css: "#availability"}
+    transforms: [clean_text]
+
+  - name: bullet_points
+    type: list
+    description: '"About this item" feature bullets.'
+    sources:
+      - {css_all: "#feature-bullets ul li span.a-list-item"}
+      - {css_all: "#feature-bullets li"}
+    transforms: [clean_text]
+    constraints: {max_items: 20}
+
+  - name: description
+    type: string
+    description: Long product description.
+    sources:
+      - {css: "#productDescription", regex: "^(?:Product [Dd]escription\\s+)?(.+)$"}
+      - {jsonld: description}
+    transforms: [clean_text]
+    constraints: {max_length: 5000}
+
+  - name: category_path
+    type: list
+    description: Breadcrumb categories, top level first.
+    sources:
+      - {css_all: "#wayfinding-breadcrumbs_feature_div ul li a"}
+    transforms: [clean_text]
+
+  - name: category_normalized
+    type: string
+    description: >
+      One category from config/taxonomy.yaml, chosen by semantic retrieval
+      (RAG) over the title, breadcrumbs and bullets. Good as a training label.
+    sources: []
+    rag:
+      mode: taxonomy
+      taxonomy_file: tests/taxonomy_default.yaml
+      min_score: 0.05
+      candidates: 3            # top retrieved categories ...
+      llm_margin: 0.1          # ... an LLM (if configured) picks among them when scores are this close
+
+  - name: images
+    type: list
+    description: High-resolution image URLs.
+    sources:
+      - {regex_html_all: "\"hiRes\"\\s*:\\s*\"(https://[^\"]+)\""}
+      - {css: "#landingImage", attr: data-old-hires}
+      - {css: "#landingImage", attr: src}
+    constraints: {max_items: 10}
+
+  - name: specifications
+    type: dict
+    description: "All technical-details / product-details tables as {key: value}."
+    sources:
+      - {specs: all}
+
+  # ----- Attributes that usually are NOT in a fixed place on the page.
+  # ----- They are filled by RAG: retrieve the most relevant page chunks,
+  # ----- then extract with an LLM (if configured) or with patterns.
+  - name: color
+    type: string
+    description: Main colour of the product.
+    sources:
+      - {css: "#variation_color_name .selection"}
+    transforms: [clean_text]
+    rag:
+      mode: fill
+      query: "colour color finish"
+      spec_keys: [Color, Colour]
+      patterns: ["colou?r\\s*:\\s*([A-Za-z][A-Za-z ]{1,25}?)(?=[,.;\\n]|$)"]
+
+  - name: material
+    type: string
+    description: Main material the product is made of.
+    sources: []
+    rag:
+      mode: fill
+      query: "made of material fabric construction"
+      spec_keys: [Material, Material Type, Fabric Type]
+      patterns: ["(?:made of|made from|material\\s*:)\\s*(?:eco-friendly\\s+|premium\\s+|high[- ]quality\\s+|durable\\s+)?([A-Za-z][A-Za-z-]*(?:\\s[A-Za-z-]+){0,2}?)(?=[,.;\\n]|\\s+(?:and|with|for|that|which)\\b|$)"]
+
+  - name: item_weight
+    type: string
+    description: Weight with unit, e.g. "1.2 pounds".
+    sources: []
+    rag:
+      mode: fill
+      query: "item weight pounds ounces grams kg"
+      spec_keys: [Item Weight, Weight]
+      patterns: ["([0-9.]+\\s?(?:pounds|pound|lbs|lb|ounces|ounce|oz|grams|g|kilograms|kg))\\b"]
+
+  - name: dimensions
+    type: string
+    description: Product dimensions as written on the page.
+    sources: []
+    rag:
+      mode: fill
+      query: "product dimensions size inches cm"
+      spec_keys: [Product Dimensions, Item Dimensions LxWxH, Dimensions, Package Dimensions]
+
+  # ----- Pipeline-filled fields
+  - name: url
+    type: string
+    required: true
+    sources:
+      - {computed: url}
+  - name: marketplace
+    type: string
+    sources:
+      - {computed: marketplace}
+  - name: scraped_at
+    type: string
+    description: ISO-8601 UTC timestamp.
+    sources:
+      - {computed: scraped_at}
+# ---------------------------------------------------------------------
+#  REVIEWS  —  individual reviews written to reviews.csv, linked by `asin`,
+#  in the same split as their product. CSS selectors are relative to one
+#  review element (`containers`). Review text is never RAG evidence.
+#
+#  NOTE (checked Nov 2026): amazon.com shows individual reviews only to
+#  signed-in users; logged-out product pages carry the review signals
+#  above (histogram, "Customers say", aspects) instead. These selectors
+#  extract reviews from pages that do include them, e.g. pages you saved
+#  while signed in (`run --html-dir`) or marketplaces that still show them.
+# ---------------------------------------------------------------------
+reviews:
+  enabled: true
+  primary_key: review_id
+  max_per_product: 20
+  containers:
+    - "#cm-cr-dp-review-list [data-hook='review']"
+    - "#cm-cr-global-review-list [data-hook='review']"
+    - "[data-hook='review']"
+  fields:
+    - name: review_id
+      type: string
+      required: true
+      sources:
+        - {attr: id, regex: "(R[A-Z0-9]{8,20})"}
+    - name: asin
+      type: string
+      required: true
+      sources:
+        - {computed: asin}
+    - name: rating
+      type: float
+      description: Stars given by the reviewer (1-5).
+      constraints: {min: 1, max: 5}
+      sources:
+        - {css: "[data-hook='review-star-rating'] .a-icon-alt"}
+        - {css: "[data-hook='cmps-review-star-rating'] .a-icon-alt"}
+        - {css: "i[class*='a-star'] .a-icon-alt"}
+      transforms: [parse_float]
+
+    - name: title
+      type: string
+      sources:
+        - {css: "a[data-hook='review-title'] > span:not(.a-icon-alt):not(.a-letter-space)"}
+        - {css: "[data-hook='review-title'] .cr-original-review-content"}
+        - {css: "[data-hook='review-title']"}
+      transforms: [clean_text, strip_star_text]
+
+    - name: body
+      type: string
+      required: true
+      sources:
+        - {css: "[data-hook='review-body'] .cr-original-review-content"}
+        - {css: "[data-hook='review-body'] span"}
+        - {css: "[data-hook='review-body']"}
+      transforms: [clean_text, clean_review_text]
+      constraints: {max_length: 5000}
+
+    - name: author
+      type: string
+      sources:
+        - {css: ".a-profile-name"}
+      transforms: [clean_text]
+
+    - name: review_date
+      type: string
+      description: YYYY-MM-DD
+      sources:
+        - {css: "[data-hook='review-date']"}
+      transforms: [parse_date]
+
+    - name: review_country
+      type: string
+      sources:
+        - {css: "[data-hook='review-date']", regex: "Reviewed in (?:the )?(.+?) on "}
+    - name: verified_purchase
+      type: bool
+      sources:
+        - {exists: "[data-hook^='avp-badge']"}
+    - name: helpful_votes
+      type: int
+      sources:
+        - {css: "[data-hook='helpful-vote-statement']"}
+      transforms: [parse_helpful]
+      default: 0
+
+    - name: variant
+      type: string
+      description: 'Variation the reviewer bought, e.g. "Color: Black".'
+      sources:
+        - {css: "[data-hook='format-strip']"}
+      transforms: [clean_text]

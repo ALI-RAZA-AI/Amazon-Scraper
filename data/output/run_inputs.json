@@ -1,0 +1,26 @@
+{
+ "marketplace": "amazon.com",
+ "updated": "2026-11-19T17:03:12+00:00",
+ "jobs": [
+  {
+   "url": "https://www.amazon.com/dp/B0TEST0001",
+   "file": "C:\\Users\\Lenovo\\amazon_dataset_pipeline\\tests\\fixtures\\B0TEST0001.html"
+  },
+  {
+   "url": "https://www.amazon.com/dp/B0TEST0002",
+   "file": "C:\\Users\\Lenovo\\amazon_dataset_pipeline\\tests\\fixtures\\B0TEST0002.html"
+  },
+  {
+   "url": "https://www.amazon.com/dp/B0TEST0003",
+   "file": "C:\\Users\\Lenovo\\amazon_dataset_pipeline\\tests\\fixtures\\B0TEST0003.html"
+  },
+  {
+   "url": "https://www.amazon.com/dp/B0TEST0004",
+   "file": "C:\\Users\\Lenovo\\amazon_dataset_pipeline\\tests\\fixtures\\B0TEST0004.html"
+  },
+  {
+   "url": "https://www.amazon.com/dp/B0TEST0005",
+   "file": "C:\\Users\\Lenovo\\amazon_dataset_pipeline\\tests\\fixtures\\B0TEST0005.html"
+  }
+ ]
+}
